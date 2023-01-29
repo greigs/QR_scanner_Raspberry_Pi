@@ -66,10 +66,17 @@ void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
             decodedObjects.push_back(obj);
 
             // debug - print type and data
-            cout << nb_frames << endl;
-            cout << "Type : " << obj.type << endl;
-            cout << "Data : " << obj.data << endl << endl;
-
+            // cout << nb_frames << endl;
+            // cout << "Type : " << obj.type << endl;
+            // cout << "Data : " << obj.data << endl << endl;
+        }
+        
+        for(size_t i = 0; i<decodedObjects.size(); i++){
+            std::stringstream ss;
+            ss << "output_" << i << ".bin";
+            std::ofstream output_file(ss.str(), std::ios::binary);
+            output_file.write(decodedObjects[i].data.c_str(), decodedObjects[i].data.size());
+            output_file.close();
         }
         display(im, decodedObjects);
     }
@@ -105,7 +112,7 @@ int main()
     //it will be cropped to 720x720
     int capture_width = 1024;
     int capture_height = 768;
-    int framerate = 15 ;
+    int framerate = 30;
     int display_width = 1024;
     int display_height = 768;
 
@@ -124,6 +131,7 @@ int main()
     // see: http://zbar.sourceforge.net/api/zbar_8h.html#f7818ad6458f9f40362eecda97acdcb0
     scanner.set_config(zbar::ZBAR_NONE, zbar::ZBAR_CFG_ENABLE, 0);
     scanner.set_config(zbar::ZBAR_QRCODE, zbar::ZBAR_CFG_ENABLE, 1);
+    scanner.set_config(zbar::ZBAR_QRCODE, zbar::ZBAR_CFG_BINARY, 1);
 
     std::cout<<"Sample program for scanning QR codes"<<std::endl;
     std::cout<<"Press ESC to stop."<<std::endl;
