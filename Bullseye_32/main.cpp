@@ -9,6 +9,8 @@ using namespace std;
 
 // Create zbar scanner
 zbar::ImageScanner scanner;
+std::vector<std::string> written_data;
+size_t fileNameIndex = 0;
 
 struct decodedObject
 {
@@ -68,15 +70,28 @@ void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
             // debug - print type and data
             // cout << nb_frames << endl;
             // cout << "Type : " << obj.type << endl;
-            // cout << "Data : " << obj.data << endl << endl;
+            // cout << "Data : " << obj.data << endl << endl; 
+            // decodedObjects[i].data.c_str()
         }
         
         for(size_t i = 0; i<decodedObjects.size(); i++){
+            std::string data = decodedObjects[i].data;
             std::stringstream ss;
-            ss << "output_" << i << ".bin";
+            ss << "output_" << fileNameIndex << ".bin";
             std::ofstream output_file(ss.str(), std::ios::binary);
-            output_file.write(decodedObjects[i].data.c_str(), decodedObjects[i].data.size());
-            output_file.close();
+            // if(!output_file.is_open()) {
+            //     std::cout << "Error: Could not open file " << ss.str() << std::endl;
+            //     return;
+            // }
+            if (std::find(written_data.begin(), written_data.end(), data) == written_data.end()) {
+                std::ofstream output_file(ss.str(), std::ios::binary);
+                output_file.write(data.c_str(), data.size());
+                written_data.push_back(data);
+                output_file.close();
+                fileNameIndex++;
+            } else {
+                std::cout << "Data already written to a file." << std::endl;
+            }
         }
         display(im, decodedObjects);
     }
