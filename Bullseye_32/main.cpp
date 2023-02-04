@@ -11,6 +11,7 @@ using namespace std;
 zbar::ImageScanner scanner;
 std::vector<std::string> written_data;
 size_t fileNameIndex = 0;
+int framesSinceLastDetection = 0;
 
 struct decodedObject
 {
@@ -42,6 +43,7 @@ void display(cv::Mat &im, vector<decodedObject>&decodedObjects)
 
 void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
 {
+    if (framesSinceLastDetection == 0 || framesSinceLastDetection > 5){
     // Convert image to grayscale
     cv::Mat imGray;
 
@@ -53,7 +55,8 @@ void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
     // Scan the image for barcodes and QRCodes
     int res = scanner.scan(image);
 
-    if (res > 0) {
+    if (res > 0 && (framesSinceLastDetection == 0 || framesSinceLastDetection > 5) ) {
+        framesSinceLastDetection= 1;
         // Print results
         for(zbar::Image::SymbolIterator symbol = image.symbol_begin(); symbol != image.symbol_end(); ++symbol){
             decodedObject obj;
@@ -95,19 +98,28 @@ void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
         }
         display(im, decodedObjects);
     }
+    else{
+        framesSinceLastDetection++;
+    }
+    }else{
+        framesSinceLastDetection++;
+    }
 }
 /// For the Raspberry Pi 64-bit Bullseye OS
 
 std::string gstreamer_pipeline(int capture_width, int capture_height, int framerate, int display_width, int display_height) {
     return
             " libcamerasrc ! video/x-raw, "
+            //" contrast=(int)5,"
             " width=(int)" + std::to_string(capture_width) + ","
             " height=(int)" + std::to_string(capture_height) + ","
             " framerate=(fraction)" + std::to_string(framerate) +"/1 !"
             " videoconvert ! videoscale !"
             " video/x-raw,"
+            //" format=(string)GRAY8,"
+            //" contrast=(int)5,"
             " width=(int)" + std::to_string(display_width) + ","
-            " height=(int)" + std::to_string(display_height) + " ! appsink";
+            " height=(int)" + std::to_string(display_height) + " ! videobalance contrast=1.7 saturation=0 ! appsink";
 }
 
 int main()
@@ -118,6 +130,7 @@ int main()
     float f;
     float FPS[16];
     int i, Fcnt=0;
+
     chrono::steady_clock::time_point Tbegin, Tend;
 
     for(i=0;i<16;i++) FPS[i]=0.0;
@@ -170,7 +183,9 @@ int main()
         if(f>0.0) FPS[((Fcnt++)&0x0F)]=1000.0/f;
         for(f=0.0, i=0;i<16;i++){ f+=FPS[i]; }
         putText(image, cv::format("FPS %0.2f", f/16),cv::Point(10,20),cv::FONT_HERSHEY_SIMPLEX,0.6, cv::Scalar(0, 0, 255));
+        //std::cout << std::to_string(1000.0/f) << std::endl;
 
+        //cv::resize(image, cv::Size(800, 600));
         //show result
         cv::imshow("Video",image);
         ch=cv::waitKey(10);
