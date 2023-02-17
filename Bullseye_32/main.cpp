@@ -4,6 +4,7 @@
 #include <vector>
 #include <zbar.h>
 #include <opencv2/opencv.hpp>
+#include <stdlib.h>
 
 using namespace std;
 
@@ -19,6 +20,24 @@ struct decodedObject
     string data;
     vector <cv::Point> location;
 };
+
+void playSound(){
+    system("cvlc --play-and-exit /home/pi/QR_scanner_Raspberry_Pi/Bullseye_32/build/beep.wav");
+// int pid;
+// 	pid=fork();
+// 	if(pid==0)
+// 	{
+// 		//printf("I am the child\n");
+// 		execlp("/usr/bin/cvlc", " ", "/home/pi/QR_scanner_Raspberry_Pi/Bullseye_32/build/beep.wav", NULL);		//Execute file: file, arguments (1 or more strings followed by NULL)
+// 		//_exit(0);
+// 	}
+// 	else
+// 	{
+// 		//printf("I am the parent\n");
+// 		wait();
+// 	} 
+}
+
 
 // Display barcode and QR code location
 void display(cv::Mat &im, vector<decodedObject>&decodedObjects)
@@ -43,65 +62,71 @@ void display(cv::Mat &im, vector<decodedObject>&decodedObjects)
 
 void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
 {
-    if (framesSinceLastDetection == 0 || framesSinceLastDetection > 5){
-    // Convert image to grayscale
-    cv::Mat imGray;
+    if (framesSinceLastDetection == 0 || framesSinceLastDetection > 5)
+    {
+        // Convert image to grayscale
+        cv::Mat imGray;
 
-    cv::cvtColor(im, imGray, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(im, imGray, cv::COLOR_BGR2GRAY);
 
-    // Wrap image data in a zbar image
-    zbar::Image image(im.cols, im.rows, "Y800", (uchar*)imGray.data, im.cols*im.rows);
+        // Wrap image data in a zbar image
+        zbar::Image image(im.cols, im.rows, "Y800", (uchar*)imGray.data, im.cols*im.rows);
 
-    // Scan the image for barcodes and QRCodes
-    int res = scanner.scan(image);
+        // Scan the image for barcodes and QRCodes
+        int res = scanner.scan(image);
 
-    if (res > 0 && (framesSinceLastDetection == 0 || framesSinceLastDetection > 5) ) {
-        framesSinceLastDetection= 1;
-        // Print results
-        for(zbar::Image::SymbolIterator symbol = image.symbol_begin(); symbol != image.symbol_end(); ++symbol){
-            decodedObject obj;
+        if (res > 0 && (framesSinceLastDetection == 0 || framesSinceLastDetection > 5) ) {
+            framesSinceLastDetection= 1;
+            // Print results
+            for(zbar::Image::SymbolIterator symbol = image.symbol_begin(); symbol != image.symbol_end(); ++symbol){
+                decodedObject obj;
 
-            obj.type = symbol->get_type_name();
-            obj.data = symbol->get_data();
-            // Obtain location
+                obj.type = symbol->get_type_name();
+                obj.data = symbol->get_data();
+                // Obtain location
 
-            for(int i = 0; i< symbol->get_location_size(); i++){
-                obj.location.push_back(cv::Point(symbol->get_location_x(i),symbol->get_location_y(i)));
+                for(int i = 0; i< symbol->get_location_size(); i++){
+                    obj.location.push_back(cv::Point(symbol->get_location_x(i),symbol->get_location_y(i)));
+                }
+                decodedObjects.push_back(obj);
+
+                // debug - print type and data
+                // cout << nb_frames << endl;
+                // cout << "Type : " << obj.type << endl;
+                // cout << "Data : " << obj.data << endl << endl; 
+                // decodedObjects[i].data.c_str()
             }
-            decodedObjects.push_back(obj);
-
-            // debug - print type and data
-            // cout << nb_frames << endl;
-            // cout << "Type : " << obj.type << endl;
-            // cout << "Data : " << obj.data << endl << endl; 
-            // decodedObjects[i].data.c_str()
-        }
-        
-        for(size_t i = 0; i<decodedObjects.size(); i++){
-            std::string data = decodedObjects[i].data;
-            std::stringstream ss;
-            ss << "output_" << fileNameIndex << ".bin";
-            std::ofstream output_file(ss.str(), std::ios::binary);
-            // if(!output_file.is_open()) {
-            //     std::cout << "Error: Could not open file " << ss.str() << std::endl;
-            //     return;
-            // }
-            if (std::find(written_data.begin(), written_data.end(), data) == written_data.end()) {
-                std::ofstream output_file(ss.str(), std::ios::binary);
-                output_file.write(data.c_str(), data.size());
-                written_data.push_back(data);
-                output_file.close();
-                fileNameIndex++;
-            } else {
-                std::cout << "Data already written to a file." << std::endl;
+            
+            for(size_t i = 0; i<decodedObjects.size(); i++){
+                std::string data = decodedObjects[i].data;
+                std::stringstream ss;
+                ss << "/home/pi/QR_scanner_Raspberry_Pi/Bullseye_32/build/output_" << fileNameIndex << ".bin";
+                // std::ofstream output_file(ss.str(), std::ios::binary);
+                // if(!output_file.is_open()) {
+                //     std::cout << "Error: Could not open file " << ss.str() << std::endl;
+                //     return;
+                // }
+                if (std::find(written_data.begin(), written_data.end(), data) == written_data.end()) {
+                    std::ofstream output_file(ss.str(), std::ios::binary);
+                    output_file.write(data.c_str(), data.size());
+                    written_data.push_back(data);
+                    output_file.close();
+                    fileNameIndex++;
+                    playSound();
+                } else {
+                    std::cout << "Data already written to a file." << std::endl;
+                    //playSound();
+                }
             }
+            display(im, decodedObjects);
         }
-        display(im, decodedObjects);
+        else
+        {
+            framesSinceLastDetection++;
+        }
     }
-    else{
-        framesSinceLastDetection++;
-    }
-    }else{
+    else
+    {
         framesSinceLastDetection++;
     }
 }
@@ -121,6 +146,7 @@ std::string gstreamer_pipeline(int capture_width, int capture_height, int framer
             " width=(int)" + std::to_string(display_width) + ","
             " height=(int)" + std::to_string(display_height) + " ! videobalance contrast=1.7 saturation=0 ! appsink";
 }
+
 
 int main()
 {
