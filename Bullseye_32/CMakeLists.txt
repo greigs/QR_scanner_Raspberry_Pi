@@ -12,7 +12,8 @@ macro(use_cxx11)
   endif ()
 endmacro(use_cxx11)
 
-find_package(OpenCV REQUIRED)                              
+find_package(OpenCV REQUIRED)
+find_package(ALSA REQUIRED)                              
 
 set(SOURCES ./main.cpp)
 
@@ -20,12 +21,12 @@ set(EXTRA_LIBS ${OpenCV_LIBS} libgobject-2.0.so libgstreamer-1.0.so libgstapp-1.
 
 set(EXECUTABLE_OUTPUT_PATH "./")
 
-link_directories(/usr/lib/arm-linux-gnueabihf/ /usr/local/lib/)
+link_directories(/usr/lib/arm-linux-gnueabihf/ /usr/local/lib/ /usr/lib/arm-linux-gnueabihf/)
 
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-add_link_options(-fopenmp -s -ldl -lpthread)
+add_link_options(-fopenmp -s -ldl -lpthread -lasound)
 
 add_executable(QRpi ${SOURCES})
 
-target_link_libraries(QRpi ${EXTRA_LIBS})
+target_link_libraries(QRpi ${EXTRA_LIBS} ${ALSA_LIBRARIES})
