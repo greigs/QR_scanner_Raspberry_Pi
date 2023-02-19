@@ -16,34 +16,14 @@ using namespace std;
 #include <stdio.h>
 #include <stdlib.h>
 
-void play_wav(const char* file_name) {
-    FILE *file = fopen(file_name, "rb");
-    if (!file) {
-        fprintf(stderr, "Failed to open file '%s'\n", file_name);
-        return;
-    }
+char header[44];
+int num_channels;
+int sample_rate;
+int bits_per_sample;
+double duration;
+unsigned char* buffer;
 
-    // Get file size
-    fseek(file, 0L, SEEK_END);
-    long filesize = ftell(file);
-    rewind(file);
-
-    // Read file header
-    char header[44];
-    if (fread(header, sizeof(header), 1, file) != 1) {
-        fprintf(stderr, "Failed to read file header\n");
-        fclose(file);
-        return;
-    }
-
-    // Parse header
-    int sample_rate = *(int*)(header + 24);    
-    int num_channels = 2;
-    int bits_per_sample = 16;
-
-    // Calculate duration
-    int header_size = 44;  // assume WAV format
-    double duration = (double)(filesize - header_size) / (sample_rate * num_channels * bits_per_sample / 8);
+void play_wav(){
     // Play sound file
     snd_pcm_t *handle;
     snd_pcm_hw_params_t *params;
@@ -58,44 +38,55 @@ void play_wav(const char* file_name) {
     snd_pcm_hw_params(handle, params);
     snd_pcm_uframes_t frames = 32;
     snd_pcm_prepare(handle);
-    unsigned char buffer[4 * frames];
     int bytes_per_frame = num_channels * bits_per_sample / 8;
     long num_frames = (long)(duration * sample_rate);
     for (long i = 0; i < num_frames / frames; i++) {
-        for (int j = 0; j < frames; j++) {
-            if (fread(buffer + j * bytes_per_frame, bytes_per_frame, 1, file) != 1) {
-                fprintf(stderr, "Failed to read from file\n");
-                fclose(file);
-                snd_pcm_close(handle);
-                return;
-            }
-        }
-        snd_pcm_writei(handle, buffer, frames);
+        snd_pcm_writei(handle, buffer + i * frames * bytes_per_frame, frames);
     }
     long remaining_frames = num_frames % frames;
-    for (int j = 0; j < remaining_frames; j++) {
-        if (fread(buffer + j * bytes_per_frame, bytes_per_frame, 1, file) != 1) {
-            fprintf(stderr, "Failed to read from file\n");
-            fclose(file);
-            snd_pcm_close(handle);
-            return;
-        }
-    }
-    snd_pcm_writei(handle, buffer, remaining_frames);
+    snd_pcm_writei(handle, buffer + (num_frames / frames) * frames * bytes_per_frame, remaining_frames);
     snd_pcm_drain(handle);
     snd_pcm_close(handle);
-
-    fclose(file);
 }
 
+void load_wav(const char* file_name) {
+    FILE *file = fopen(file_name, "rb");
+    if (!file) {
+        fprintf(stderr, "Failed to open file '%s'\n", file_name);
+        return;
+    }
 
-// int main() {
-//     const char* file_name = "example.wav";
-//     std::thread t(play_wav, file_name);
-//     t.join();
-//     return 0;
-// }
+    // Get file size
+    fseek(file, 0L, SEEK_END);
+    long filesize = ftell(file);
+    rewind(file);
 
+    // Read file header
+    
+    if (fread(header, sizeof(header), 1, file) != 1) {
+        fprintf(stderr, "Failed to read file header\n");
+        fclose(file);
+        return;
+    }
+
+    // Parse header
+    num_channels = header[22];
+    sample_rate = *(int*)&header[24];
+    bits_per_sample = header[34];
+
+    // Calculate duration
+    int header_size = 44;  // assume WAV format
+    duration = (double)(filesize - header_size) / (sample_rate * num_channels * bits_per_sample / 8);
+
+    // Load file into buffer
+    buffer = (unsigned char*)malloc(filesize - header_size);
+    if (fread(buffer, sizeof(char), filesize, file) != filesize - header_size) {
+        fprintf(stderr, "Failed to read file data\n");
+        free(buffer);
+        return;
+    }
+    fclose(file);    
+}
 
 // Create zbar scanner
 zbar::ImageScanner scanner;
@@ -111,10 +102,7 @@ struct decodedObject
 };
 
 void playSound(){
-    // system("cvlc --play-and-exit /home/pi/QR_scanner_Raspberry_Pi/Bullseye_32/build/beep.wav");
-     const char* file_name = "/home/pi/QR_scanner_Raspberry_Pi/Bullseye_32/build/beep.wav";
-     //play_wav(file_name);
-     std::thread t(play_wav, file_name);
+     std::thread t(play_wav);
      t.join();
 }
 
@@ -227,10 +215,12 @@ std::string gstreamer_pipeline(int capture_width, int capture_height, int framer
             " height=(int)" + std::to_string(display_height) + " ! videobalance contrast=1.7 saturation=0 ! appsink";
 }
 
-
-
 int main()
 {
+
+    const char* file_name = "/home/pi/QR_scanner_Raspberry_Pi/Bullseye_32/build/beep.wav";
+    load_wav(file_name);
+
     int ch=0;
     int nb_frames=0;
     cv::Mat image;
