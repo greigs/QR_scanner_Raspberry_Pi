@@ -15,6 +15,9 @@ using namespace std;
 #include <alsa/asoundlib.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pigpio.h>
+
+#define SWITCH_PIN 18
 
 char header[44];
 int num_channels;
@@ -22,6 +25,9 @@ int sample_rate;
 int bits_per_sample;
 double duration;
 unsigned char* buffer;
+int prevState = -2;
+cv::Mat imGray;
+
 
 void play_wav(){
     // Play sound file
@@ -36,8 +42,9 @@ void play_wav(){
     unsigned int rate = sample_rate;
     snd_pcm_hw_params_set_rate_near(handle, params, &rate, 0);
     snd_pcm_hw_params(handle, params);
-    snd_pcm_uframes_t frames = 32;
     snd_pcm_prepare(handle);
+    
+    snd_pcm_uframes_t frames = 32;
     int bytes_per_frame = num_channels * bits_per_sample / 8;
     long num_frames = (long)(duration * sample_rate);
     for (long i = 0; i < num_frames / frames; i++) {
@@ -93,6 +100,7 @@ zbar::ImageScanner scanner;
 std::vector<std::string> written_data;
 size_t fileNameIndex = 0;
 int framesSinceLastDetection = 0;
+int discardFramesAfterScan = -1;
 
 struct decodedObject
 {
@@ -103,7 +111,7 @@ struct decodedObject
 
 void playSound(){
      std::thread t(play_wav);
-     t.join();
+     t.detach();
 }
 
 
@@ -130,20 +138,17 @@ void display(cv::Mat &im, vector<decodedObject>&decodedObjects)
 
 void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
 {
-    if (framesSinceLastDetection == 0 || framesSinceLastDetection > 5)
+    if (framesSinceLastDetection == 0 || framesSinceLastDetection > discardFramesAfterScan)
     {
-        // Convert image to grayscale
-        cv::Mat imGray;
 
-        cv::cvtColor(im, imGray, cv::COLOR_BGR2GRAY);
 
         // Wrap image data in a zbar image
-        zbar::Image image(im.cols, im.rows, "Y800", (uchar*)imGray.data, im.cols*im.rows);
+        zbar::Image image(im.cols, im.rows, "Y800", (uchar*)im.data, im.cols*im.rows);
 
         // Scan the image for barcodes and QRCodes
         int res = scanner.scan(image);
 
-        if (res > 0 && (framesSinceLastDetection == 0 || framesSinceLastDetection > 5) ) {
+        if (res > 0 && (framesSinceLastDetection == 0 || framesSinceLastDetection > discardFramesAfterScan) ) {
             framesSinceLastDetection= 1;
             // Print results
             for(zbar::Image::SymbolIterator symbol = image.symbol_begin(); symbol != image.symbol_end(); ++symbol){
@@ -175,12 +180,12 @@ void decode(cv::Mat &im, vector<decodedObject>&decodedObjects, int nb_frames)
                 //     return;
                 // }
                 if (std::find(written_data.begin(), written_data.end(), data) == written_data.end()) {
+                    playSound();
                     std::ofstream output_file(ss.str(), std::ios::binary);
                     output_file.write(data.c_str(), data.size());
                     written_data.push_back(data);
                     output_file.close();
                     fileNameIndex++;
-                    playSound();
                 } else {
                     std::cout << "Data already written to a file." << std::endl;
                     //playSound();
@@ -206,20 +211,36 @@ std::string gstreamer_pipeline(int capture_width, int capture_height, int framer
             //" contrast=(int)5,"
             " width=(int)" + std::to_string(capture_width) + ","
             " height=(int)" + std::to_string(capture_height) + ","
+            //" vflip=(bool)1,"
+            //" ev=0,"
+            // " shutter=(float)10.0,"
             " framerate=(fraction)" + std::to_string(framerate) +"/1 !"
-            " videoconvert ! videoscale !"
+            " videoconvert !"
             " video/x-raw,"
             //" format=(string)GRAY8,"
             //" contrast=(int)5,"
             " width=(int)" + std::to_string(display_width) + ","
-            " height=(int)" + std::to_string(display_height) + " ! videobalance contrast=1.7 saturation=0 ! appsink";
+            " height=(int)" + std::to_string(display_height) +
+            " ! videobalance contrast=2.0 saturation=0" +
+            //" ! videobalance saturation=0" +
+            " ! appsink";
+
 }
 
 int main()
 {
+    if (gpioInitialise() < 0) {
+        std::cerr << "Error: Failed to initialize pigpio library" << std::endl;
+        return 1;
+    }
+
+    // Set SWITCH_PIN as input with pull-up resistor enabled
+    gpioSetMode(SWITCH_PIN, PI_INPUT);
+    gpioSetPullUpDown(SWITCH_PIN, PI_PUD_UP);
 
     const char* file_name = "/home/pi/QR_scanner_Raspberry_Pi/Bullseye_32/build/beep.wav";
     load_wav(file_name);
+    playSound();
 
     int ch=0;
     int nb_frames=0;
@@ -252,6 +273,7 @@ int main()
         return (-1);
     }
 
+
     // Configure scanner
     // see: http://zbar.sourceforge.net/api/zbar_8h.html#f7818ad6458f9f40362eecda97acdcb0
     scanner.set_config(zbar::ZBAR_NONE, zbar::ZBAR_CFG_ENABLE, 0);
@@ -261,30 +283,70 @@ int main()
     std::cout<<"Sample program for scanning QR codes"<<std::endl;
     std::cout<<"Press ESC to stop."<<std::endl;
 
+    int scannedAlreadyThisTurn = 0;
+    int grabCount = 0; // number of low-cpu grabs after the switch is pushed. used this to introduce a delay before detecting
+
     while(ch!=27){
-    	if (!cap.read(image)) {
-            std::cout<<"Capture read error"<<std::endl;
-            break;
+        int pressed = gpioRead(SWITCH_PIN);
+        
+        if (prevState == 0 && pressed == 1){
+            scannedAlreadyThisTurn = 0;
+            framesSinceLastDetection = 0;
+            nb_frames = 9;
+            std::cout<<grabCount<<std::endl;
+            grabCount = 0;
+            std::cout<<"scannedAlreadyThisTurn = 0, framesSinceLastDetection = 0"<<std::endl;
         }
-        //capture
-        cv::Mat crop_img = image(cv::Range(24,744), cv::Range(152,872));
+        prevState = pressed;
+        if (pressed == 1 && scannedAlreadyThisTurn == 0 && grabCount > 2)
+        {
+            // switch closed
 
-        // Find and decode barcodes and QR codes
-        vector<decodedObject> decodedObjects;
-        decode(image, decodedObjects, nb_frames++);
+            if (!cap.read(image)) {
+                std::cout<<"Capture read error"<<std::endl;
+                break;
+            }
+            //capture
+            // cv::Mat crop_img = image(cv::Range(24,744), cv::Range(152,872));
+            cv::Mat crop_img = image(cv::Range(100,768), cv::Range(0,1024));
 
-        //calculate frame rate (just for your convenience)
-        Tend = chrono::steady_clock::now();
-        f = chrono::duration_cast <chrono::milliseconds> (Tend - Tbegin).count();
-        Tbegin = Tend;
-        if(f>0.0) FPS[((Fcnt++)&0x0F)]=1000.0/f;
-        for(f=0.0, i=0;i<16;i++){ f+=FPS[i]; }
-        putText(image, cv::format("FPS %0.2f", f/16),cv::Point(10,20),cv::FONT_HERSHEY_SIMPLEX,0.6, cv::Scalar(0, 0, 255));
-        //std::cout << std::to_string(1000.0/f) << std::endl;
+            // Find and decode barcodes and QR codes
+            vector<decodedObject> decodedObjects;
 
-        //cv::resize(image, cv::Size(800, 600));
-        //show result
-        cv::imshow("Video",image);
+            // Convert image to grayscale
+
+            cv::cvtColor(crop_img, imGray, cv::COLOR_BGR2GRAY);
+
+            int pixelValue = (int)imGray.at<uchar>(768-100-20,512);
+            cout << pixelValue << endl;
+            if (pixelValue < 100){
+                decode(imGray, decodedObjects, nb_frames++);
+
+                //calculate frame rate (just for your convenience)
+                Tend = chrono::steady_clock::now();
+                f = chrono::duration_cast <chrono::milliseconds> (Tend - Tbegin).count();
+                Tbegin = Tend;
+                if(f>0.0) FPS[((Fcnt++)&0x0F)]=1000.0/f;
+                for(f=0.0, i=0;i<16;i++){ f+=FPS[i]; }
+                
+                //std::cout << std::to_string(1000.0/f) << std::endl;
+
+                //cv::resize(image, cv::Size(800, 600));
+                //show result
+                if (decodedObjects.size() > 0){
+                    scannedAlreadyThisTurn = 1;
+                }
+                if ((decodedObjects.size() > 0 || nb_frames % 10 == 0) && (framesSinceLastDetection > discardFramesAfterScan || framesSinceLastDetection == 1) )
+                {
+                    putText(imGray, cv::format("FPS %0.2f", f/16),cv::Point(10,20),cv::FONT_HERSHEY_SIMPLEX,0.6, cv::Scalar(0, 0, 255));
+                    cv::imshow("Video",imGray);
+                }
+            }
+        }
+        else{
+            cap.grab();
+            grabCount++;
+        }
         ch=cv::waitKey(10);
     }
     cap.release();

@@ -13,7 +13,12 @@ macro(use_cxx11)
 endmacro(use_cxx11)
 
 find_package(OpenCV REQUIRED)
-find_package(ALSA REQUIRED)                              
+find_package(ALSA REQUIRED)        
+                 
+
+find_library(PIGPIO_LIBRARY NAMES pigpio)
+find_path(PIGPIO_INCLUDE_DIR pigpio.h)
+
 
 set(SOURCES ./main.cpp)
 
@@ -29,4 +34,4 @@ add_link_options(-fopenmp -s -ldl -lpthread -lasound)
 
 add_executable(QRpi ${SOURCES})
 
-target_link_libraries(QRpi ${EXTRA_LIBS} ${ALSA_LIBRARIES})
+target_link_libraries(QRpi ${EXTRA_LIBS} ${ALSA_LIBRARIES} ${PIGPIO_LIBRARY})
